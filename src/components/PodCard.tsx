@@ -123,7 +123,7 @@ export default function PodCard({ pod, isJoined, userId }: PodCardProps) {
               )}
               {userId && memberCount >= pod.max_members && (
                 <span className="rounded-md px-3 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border">
-                  Full
+                  Pod is full
                 </span>
               )}
             </div>

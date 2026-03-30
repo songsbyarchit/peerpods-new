@@ -13,7 +13,7 @@ create table pods (
   tag text not null,
   creator_id uuid references profiles(id),
   expires_at timestamptz not null,
-  max_members int default 8,
+  max_members int default 6,
   created_at timestamptz default now()
 );
 
@@ -75,5 +75,6 @@ create policy "Pod members can send messages"
     )
   );
 
--- Enable realtime for messages
+-- Enable realtime for messages and pod_members
 alter publication supabase_realtime add table messages;
+alter publication supabase_realtime add table pod_members;

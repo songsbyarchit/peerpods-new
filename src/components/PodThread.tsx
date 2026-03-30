@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useTransition } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 import { formatTimeRemaining, isPodExpired, formatMessageTime } from "@/lib/utils";
 import MessageInput from "@/components/MessageInput";
+import { leavePod } from "@/app/actions";
 import type { Message, Pod } from "@/lib/types";
 
 interface PodThreadProps {
@@ -13,6 +14,7 @@ interface PodThreadProps {
   memberCount: number;
   userId: string | null;
   isMember: boolean;
+  isCreator: boolean;
 }
 
 export default function PodThread({
@@ -21,14 +23,25 @@ export default function PodThread({
   memberCount,
   userId,
   isMember,
+  isCreator,
 }: PodThreadProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [timeLeft, setTimeLeft] = useState(() => formatTimeRemaining(pod.expires_at));
   const [expired, setExpired] = useState(() => isPodExpired(pod.expires_at));
   const [currentMemberCount, setCurrentMemberCount] = useState(memberCount);
+  const [leaveError, setLeaveError] = useState<string | null>(null);
+  const [isLeavePending, startLeaveTransition] = useTransition();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isInitialLoad = useRef(true);
   const supabase = createClient();
+
+  function handleLeave() {
+    setLeaveError(null);
+    startLeaveTransition(async () => {
+      const result = await leavePod(pod.id);
+      if (result?.error) setLeaveError(result.error);
+    });
+  }
 
   // Countdown timer
   useEffect(() => {
@@ -95,6 +108,16 @@ export default function PodThread({
         },
         () => setCurrentMemberCount((c) => c + 1)
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "pod_members",
+          filter: `pod_id=eq.${pod.id}`,
+        },
+        () => setCurrentMemberCount((c) => Math.max(0, c - 1))
+      )
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -119,13 +142,29 @@ export default function PodThread({
               </div>
               <h1 className="truncate text-base font-semibold">{pod.title}</h1>
             </div>
-            <div className="shrink-0 text-right">
-              <p className="text-xs text-muted-foreground">
-                {currentMemberCount}/{pod.max_members} members
-              </p>
-              <p className={`text-xs font-medium ${expired ? "text-muted-foreground" : "text-primary"}`}>
-                {timeLeft}
-              </p>
+            <div className="shrink-0 flex items-center gap-3">
+              <div className="text-right">
+                <p className="text-xs text-muted-foreground">
+                  {currentMemberCount}/{pod.max_members} members
+                </p>
+                <p className={`text-xs font-medium ${expired ? "text-muted-foreground" : "text-primary"}`}>
+                  {timeLeft}
+                </p>
+              </div>
+              {isMember && !isCreator && !expired && (
+                <div className="flex flex-col items-end gap-0.5">
+                  <button
+                    onClick={handleLeave}
+                    disabled={isLeavePending}
+                    className="rounded-md px-3 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border transition-colors hover:bg-destructive/10 hover:text-destructive hover:ring-destructive/30 disabled:opacity-60"
+                  >
+                    {isLeavePending ? "Leaving…" : "Leave"}
+                  </button>
+                  {leaveError && (
+                    <span className="text-xs text-destructive">{leaveError}</span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

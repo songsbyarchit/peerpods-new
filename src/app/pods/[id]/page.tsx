@@ -50,6 +50,8 @@ export default async function PodPage({
     isMember = !!membership;
   }
 
+  const isCreator = !!user && pod.creator_id === user.id;
+
   return (
     <div className="flex h-[calc(100vh-56px)] flex-col">
       <div className="border-b border-border px-4 py-2">
@@ -69,6 +71,7 @@ export default async function PodPage({
         memberCount={memberCount ?? 0}
         userId={user?.id ?? null}
         isMember={isMember}
+        isCreator={isCreator}
       />
     </div>
   );

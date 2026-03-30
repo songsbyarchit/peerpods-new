@@ -111,7 +111,7 @@ export async function createPod(
 
   const { data: pod, error: podError } = await supabase
     .from("pods")
-    .insert({ title, description, tag, creator_id: user.id, expires_at: expiresAt })
+    .insert({ title, description, tag, creator_id: user.id, expires_at: expiresAt, max_members: 6 })
     .select()
     .single();
 
@@ -195,6 +195,37 @@ export async function joinPod(
   revalidatePath(`/pods/${podId}`);
   revalidatePath("/");
   redirect(`/pods/${podId}`);
+}
+
+export async function leavePod(
+  podId: string
+): Promise<{ error: string } | void> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: pod } = await supabase
+    .from("pods")
+    .select("creator_id")
+    .eq("id", podId)
+    .single();
+
+  if (!pod) return { error: "Pod not found" };
+  if (pod.creator_id === user.id) return { error: "You cannot leave a pod you created" };
+
+  const { error } = await supabase
+    .from("pod_members")
+    .delete()
+    .eq("pod_id", podId)
+    .eq("user_id", user.id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/");
+  revalidatePath(`/pods/${podId}`);
+  redirect("/");
 }
 
 export async function sendMessage(
