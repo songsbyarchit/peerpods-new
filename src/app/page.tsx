@@ -1,65 +1,141 @@
-import Image from "next/image";
+import { createServerSupabaseClient } from "@/lib/supabase";
+import PodCard from "@/components/PodCard";
+import type { PodWithCount } from "@/lib/types";
+import Link from "next/link";
 
-export default function Home() {
+export default async function BrowsePage() {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const now = new Date().toISOString();
+
+  // Fetch all open pods with member count
+  const { data: pods } = await supabase
+    .from("pods")
+    .select("*, pod_members(count)")
+    .gt("expires_at", now)
+    .order("created_at", { ascending: false });
+
+  const openPods = (pods as PodWithCount[] | null) ?? [];
+
+  // Get IDs of pods the user has joined
+  let joinedPodIds = new Set<string>();
+  let userTags: string[] = [];
+
+  if (user) {
+    const { data: memberships } = await supabase
+      .from("pod_members")
+      .select("pod_id")
+      .eq("user_id", user.id);
+
+    if (memberships) {
+      joinedPodIds = new Set(memberships.map((m) => m.pod_id));
+    }
+
+    // Get tags from pods the user has been in (for similar pods)
+    if (joinedPodIds.size > 0) {
+      const { data: joinedPods } = await supabase
+        .from("pods")
+        .select("tag")
+        .in("id", [...joinedPodIds]);
+
+      if (joinedPods) {
+        userTags = [...new Set(joinedPods.map((p) => p.tag))];
+      }
+    }
+  }
+
+  // Similar pods: open pods not joined by user, matching a tag the user has used
+  const similarPods =
+    userTags.length > 0
+      ? openPods.filter(
+          (p) => !joinedPodIds.has(p.id) && userTags.includes(p.tag)
+        )
+      : [];
+
+  const browsePods = openPods.filter((p) => !similarPods.includes(p));
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="mx-auto max-w-4xl px-4 py-8">
+      {/* Hero */}
+      {!user && (
+        <div className="mb-10 rounded-2xl bg-accent/50 px-6 py-8 text-center">
+          <h1 className="mb-2 text-2xl font-bold tracking-tight">
+            Focused conversations, time-boxed.
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="mb-4 text-muted-foreground">
+            Join a Pod, discuss something real, and let it end. No feed, no
+            followers — just honest conversation.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href="/login"
+            className="inline-flex rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            Join PeerPods — it&apos;s free
+          </Link>
         </div>
-      </main>
+      )}
+
+      {/* Similar pods section */}
+      {similarPods.length > 0 && (
+        <section className="mb-10">
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            You might like
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {similarPods.map((pod) => (
+              <PodCard
+                key={pod.id}
+                pod={pod}
+                isJoined={joinedPodIds.has(pod.id)}
+                userId={user?.id ?? null}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Open pods */}
+      <section>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Open Pods</h2>
+          {user && (
+            <Link
+              href="/pods/new"
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              + Start a new pod
+            </Link>
+          )}
+        </div>
+
+        {browsePods.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border py-16 text-center">
+            <p className="text-muted-foreground">No open pods right now.</p>
+            {user && (
+              <Link
+                href="/pods/new"
+                className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
+              >
+                Be the first to start one →
+              </Link>
+            )}
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {browsePods.map((pod) => (
+              <PodCard
+                key={pod.id}
+                pod={pod}
+                isJoined={joinedPodIds.has(pod.id)}
+                userId={user?.id ?? null}
+              />
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
