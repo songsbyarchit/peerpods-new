@@ -1,12 +1,24 @@
 "use client";
 
-import { useActionState } from "react";
-import { signInWithEmail } from "@/app/actions";
+import { useState, useTransition } from "react";
+
+type LoginState = { error?: string; sent?: boolean } | null;
 
 export default function LoginPage() {
-  const [state, action, pending] = useActionState(signInWithEmail, null);
+  const [state, setState] = useState<LoginState>(null);
+  const [isPending, startTransition] = useTransition();
 
-  if (state && "sent" in state && state.sent) {
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    startTransition(async () => {
+      const res = await fetch("/api/auth/login", { method: "POST", body: formData });
+      const data = await res.json();
+      setState(data);
+    });
+  }
+
+  if (state?.sent) {
     return (
       <div className="flex min-h-[80vh] items-center justify-center px-4">
         <div className="w-full max-w-sm text-center">
@@ -32,7 +44,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form action={action} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label
               htmlFor="email"
@@ -51,7 +63,7 @@ export default function LoginPage() {
             />
           </div>
 
-          {state && "error" in state && state.error && (
+          {state?.error && (
             <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {state.error}
             </p>
@@ -59,10 +71,10 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={pending}
+            disabled={isPending}
             className="h-10 w-full rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
           >
-            {pending ? "Sending…" : "Send magic link"}
+            {isPending ? "Sending…" : "Send magic link"}
           </button>
         </form>
 

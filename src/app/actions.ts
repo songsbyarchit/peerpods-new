@@ -6,28 +6,6 @@ import { createServerSupabaseClient } from "@/lib/supabase";
 
 export type ActionState = { error?: string; sent?: boolean } | null;
 
-export async function signInWithEmail(
-  prevState: ActionState,
-  formData: FormData
-): Promise<ActionState> {
-  const email = (formData.get("email") as string)?.trim();
-  if (!email) return { error: "Email is required" };
-
-  const supabase = await createServerSupabaseClient();
-  const siteUrl =
-    process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: `${siteUrl}/auth/callback`,
-    },
-  });
-
-  if (error) return { error: error.message };
-  return { sent: true };
-}
-
 export async function setupUsername(
   prevState: ActionState,
   formData: FormData
