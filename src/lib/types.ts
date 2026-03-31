@@ -25,6 +25,8 @@ export type Message = {
   user_id: string
   content: string
   created_at: string
+  is_edited: boolean
+  edited_at: string | null
   profiles: { username: string } | null
 }
 

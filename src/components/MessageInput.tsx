@@ -3,25 +3,34 @@
 import { useState, useTransition, useRef } from "react";
 import { sendMessage } from "@/app/actions";
 
+const MIN_LENGTH = 50;
+
 interface MessageInputProps {
   podId: string;
   onSend?: (content: string) => void;
+  consecutiveBlocked?: boolean;
 }
 
-export default function MessageInput({ podId, onSend }: MessageInputProps) {
+export default function MessageInput({
+  podId,
+  onSend,
+  consecutiveBlocked = false,
+}: MessageInputProps) {
   const [content, setContent] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const trimmedLength = content.trim().length;
+  const isLengthOk = trimmedLength >= MIN_LENGTH;
+  const canSend = isLengthOk && !consecutiveBlocked && !isPending;
+
   function handleSend() {
-    const trimmed = content.trim();
-    if (!trimmed || isPending) return;
+    if (!canSend) return;
 
     setError(null);
-    const snapshot = trimmed;
+    const snapshot = content.trim();
     setContent("");
-    // Reset height
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     onSend?.(snapshot);
@@ -46,7 +55,16 @@ export default function MessageInput({ podId, onSend }: MessageInputProps) {
 
   return (
     <div className="px-4 py-3">
+      {/* Server error */}
       {error && <p className="mb-1.5 text-xs text-destructive">{error}</p>}
+
+      {/* Consecutive blocked notice */}
+      {consecutiveBlocked && (
+        <p className="mb-1.5 text-xs text-muted-foreground/70">
+          let someone else jump in first
+        </p>
+      )}
+
       <div className="flex items-end gap-2">
         <textarea
           ref={textareaRef}
@@ -55,7 +73,7 @@ export default function MessageInput({ podId, onSend }: MessageInputProps) {
           onKeyDown={handleKeyDown}
           placeholder="Message…"
           rows={1}
-          disabled={isPending}
+          disabled={isPending || consecutiveBlocked}
           className="max-h-32 min-h-[38px] flex-1 resize-none rounded-xl border border-input bg-card px-3.5 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60 dark:bg-muted/30"
           onInput={(e) => {
             const el = e.currentTarget;
@@ -65,7 +83,7 @@ export default function MessageInput({ podId, onSend }: MessageInputProps) {
         />
         <button
           onClick={handleSend}
-          disabled={isPending || !content.trim()}
+          disabled={!canSend}
           className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-35"
           aria-label="Send message"
         >
@@ -79,6 +97,25 @@ export default function MessageInput({ podId, onSend }: MessageInputProps) {
           </svg>
         </button>
       </div>
+
+      {/* Character counter / length hint — shown while typing */}
+      {content.length > 0 && !consecutiveBlocked && (
+        <div className="mt-1.5 flex items-center justify-between px-0.5">
+          <span
+            className="text-xs text-muted-foreground/60 transition-opacity"
+            style={{ opacity: isLengthOk ? 0 : 1 }}
+          >
+            add a little more…
+          </span>
+          <span
+            className={`text-xs tabular-nums transition-colors ${
+              isLengthOk ? "text-muted-foreground/40" : "text-destructive/70"
+            }`}
+          >
+            {trimmedLength} / {MIN_LENGTH}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 import { formatTimeRemaining, isPodExpired, formatMessageTime } from "@/lib/utils";
 import MessageInput from "@/components/MessageInput";
-import { leavePod } from "@/app/actions";
+import { leavePod, editMessage } from "@/app/actions";
 import type { Message, Pod } from "@/lib/types";
 
 interface PodThreadProps {
@@ -16,6 +16,8 @@ interface PodThreadProps {
   isMember: boolean;
   isCreator: boolean;
 }
+
+const EDIT_WINDOW_MS = 5 * 60 * 1000;
 
 export default function PodThread({
   pod,
@@ -31,9 +33,24 @@ export default function PodThread({
   const [currentMemberCount, setCurrentMemberCount] = useState(memberCount);
   const [leaveError, setLeaveError] = useState<string | null>(null);
   const [isLeavePending, startLeaveTransition] = useTransition();
+
+  // Edit state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isInitialLoad = useRef(true);
   const supabase = createClient();
+
+  // Consecutive message block — based on confirmed messages only
+  const confirmedMessages = messages.filter((m) => !m.id.startsWith("optimistic-"));
+  const lastTwo = confirmedMessages.slice(-2);
+  const consecutiveBlocked =
+    !!userId &&
+    lastTwo.length >= 2 &&
+    lastTwo.every((m) => m.user_id === userId);
 
   function handleOptimisticSend(content: string) {
     setMessages((prev) => [
@@ -44,9 +61,48 @@ export default function PodThread({
         user_id: userId!,
         content,
         created_at: new Date().toISOString(),
+        is_edited: false,
+        edited_at: null,
         profiles: null,
       },
     ]);
+  }
+
+  function startEdit(msg: Message) {
+    setEditingId(msg.id);
+    setEditContent(msg.content);
+    setEditError(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditContent("");
+    setEditError(null);
+  }
+
+  async function saveEdit(messageId: string) {
+    setEditSaving(true);
+    setEditError(null);
+    const result = await editMessage(messageId, editContent);
+    setEditSaving(false);
+    if (result?.error) {
+      setEditError(result.error);
+    } else {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                content: editContent.trim(),
+                is_edited: true,
+                edited_at: new Date().toISOString(),
+              }
+            : m
+        )
+      );
+      setEditingId(null);
+      setEditContent("");
+    }
   }
 
   function handleLeave() {
@@ -57,7 +113,7 @@ export default function PodThread({
     });
   }
 
-  // Countdown timer
+  // Countdown timer — also drives the 5-min edit window re-evaluation
   useEffect(() => {
     const timer = setInterval(() => {
       setTimeLeft(formatTimeRemaining(pod.expires_at));
@@ -95,6 +151,8 @@ export default function PodThread({
             user_id: string;
             content: string;
             created_at: string;
+            is_edited: boolean;
+            edited_at: string | null;
           };
 
           const { data: profile } = await supabase
@@ -103,7 +161,11 @@ export default function PodThread({
             .eq("id", newMsg.user_id)
             .single();
 
-          const confirmed = { ...newMsg, profiles: profile ? { username: profile.username } : null };
+          const confirmed = {
+            ...newMsg,
+            profiles: profile ? { username: profile.username } : null,
+          };
+
           setMessages((prev) => {
             if (prev.some((m) => m.id === newMsg.id)) return prev;
             // Replace the optimistic placeholder for the current user's message
@@ -119,6 +181,35 @@ export default function PodThread({
             }
             return [...prev, confirmed];
           });
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `pod_id=eq.${pod.id}`,
+        },
+        (payload) => {
+          const updatedMsg = payload.new as {
+            id: string;
+            content: string;
+            is_edited: boolean;
+            edited_at: string | null;
+          };
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === updatedMsg.id
+                ? {
+                    ...m,
+                    content: updatedMsg.content,
+                    is_edited: updatedMsg.is_edited,
+                    edited_at: updatedMsg.edited_at,
+                  }
+                : m
+            )
+          );
         }
       )
       .on(
@@ -143,7 +234,9 @@ export default function PodThread({
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [pod.id, supabase]);
 
   return (
@@ -211,6 +304,14 @@ export default function PodThread({
             <div className="space-y-0.5">
               {messages.map((msg, i) => {
                 const isOwn = msg.user_id === userId;
+                const isOptimistic = msg.id.startsWith("optimistic-");
+                const isEditing = editingId === msg.id;
+                const canEdit =
+                  isOwn &&
+                  !isOptimistic &&
+                  !expired &&
+                  Date.now() - new Date(msg.created_at).getTime() < EDIT_WINDOW_MS;
+
                 const prevMsg = messages[i - 1];
                 const isFirstInGroup =
                   !prevMsg || prevMsg.user_id !== msg.user_id;
@@ -218,7 +319,7 @@ export default function PodThread({
                 return (
                   <div
                     key={msg.id}
-                    className={`flex flex-col ${isOwn ? "items-end" : "items-start"} ${isFirstInGroup ? "mt-4 first:mt-0" : "mt-0.5"}`}
+                    className={`group flex flex-col ${isOwn ? "items-end" : "items-start"} ${isFirstInGroup ? "mt-4 first:mt-0" : "mt-0.5"}`}
                   >
                     {/* Meta: username + time — only on first of a group */}
                     {isFirstInGroup && (
@@ -232,17 +333,75 @@ export default function PodThread({
                       </div>
                     )}
 
-                    {/* Bubble */}
-                    <div
-                      className={[
-                        "max-w-[75%] break-words px-3.5 py-2 text-sm leading-relaxed",
-                        "rounded-2xl",
-                        isOwn
-                          ? "rounded-br-md bg-primary text-primary-foreground"
-                          : "rounded-bl-md bg-card text-foreground ring-1 ring-border",
-                      ].join(" ")}
-                    >
-                      {msg.content}
+                    {/* Bubble row: edit icon + bubble (or inline edit form) */}
+                    <div className="flex items-end gap-1.5">
+                      {/* Pencil icon — left of bubble for own messages */}
+                      {canEdit && !isEditing && (
+                        <button
+                          onClick={() => startEdit(msg)}
+                          aria-label="Edit message"
+                          className="mb-1 text-transparent transition-colors group-hover:text-muted-foreground/40 hover:!text-muted-foreground/80"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 16 16"
+                            fill="currentColor"
+                            className="h-3 w-3"
+                          >
+                            <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.263a1.75 1.75 0 0 0 0-2.474ZM3 14.25a.75.75 0 0 1 0-1.5h10a.75.75 0 0 1 0 1.5H3Z" />
+                          </svg>
+                        </button>
+                      )}
+
+                      {isEditing ? (
+                        /* Inline edit form */
+                        <div className="flex w-72 flex-col gap-1.5">
+                          <textarea
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") cancelEdit();
+                            }}
+                            autoFocus
+                            rows={3}
+                            className="w-full resize-none rounded-xl border border-ring bg-card px-3.5 py-2 text-sm leading-relaxed outline-none ring-2 ring-ring/40 dark:bg-muted/30"
+                          />
+                          {editError && (
+                            <p className="px-0.5 text-xs text-destructive">{editError}</p>
+                          )}
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={cancelEdit}
+                              className="rounded-lg px-3 py-1 text-xs text-muted-foreground ring-1 ring-border transition-colors hover:bg-muted"
+                            >
+                              cancel
+                            </button>
+                            <button
+                              onClick={() => saveEdit(msg.id)}
+                              disabled={editSaving || editContent.trim().length < 50}
+                              className="rounded-lg bg-primary px-3 py-1 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                            >
+                              {editSaving ? "saving…" : "save"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Regular bubble */
+                        <div
+                          className={[
+                            "max-w-[75%] break-words px-3.5 py-2 text-sm leading-relaxed",
+                            "rounded-2xl",
+                            isOwn
+                              ? "rounded-br-md bg-primary text-primary-foreground"
+                              : "rounded-bl-md bg-card text-foreground ring-1 ring-border",
+                          ].join(" ")}
+                        >
+                          {msg.content}
+                          {msg.is_edited && (
+                            <span className="ml-1.5 text-[10px] opacity-50">edited</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -257,7 +416,11 @@ export default function PodThread({
       <div className="shrink-0 border-t border-border bg-background">
         <div className="mx-auto max-w-2xl">
           {!expired && isMember ? (
-            <MessageInput podId={pod.id} onSend={handleOptimisticSend} />
+            <MessageInput
+              podId={pod.id}
+              onSend={handleOptimisticSend}
+              consecutiveBlocked={consecutiveBlocked}
+            />
           ) : !expired && userId ? (
             <JoinPrompt podId={pod.id} isFull={currentMemberCount >= pod.max_members} />
           ) : !expired ? (

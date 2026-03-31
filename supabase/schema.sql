@@ -78,3 +78,10 @@ create policy "Pod members can send messages"
 -- Enable realtime for messages and pod_members
 alter publication supabase_realtime add table messages;
 alter publication supabase_realtime add table pod_members;
+
+-- Message editing
+alter table messages add column if not exists is_edited boolean default false;
+alter table messages add column if not exists edited_at timestamptz;
+
+create policy "Users can edit their own messages"
+  on messages for update using (auth.uid() = user_id);

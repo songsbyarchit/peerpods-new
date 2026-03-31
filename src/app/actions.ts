@@ -212,6 +212,7 @@ export async function sendMessage(
 ): Promise<{ error: string } | void> {
   const trimmed = content.trim();
   if (!trimmed) return { error: "Message cannot be empty" };
+  if (trimmed.length < 50) return { error: "Message too short" };
 
   const supabase = await createServerSupabaseClient();
   const {
@@ -239,9 +240,63 @@ export async function sendMessage(
 
   if (!membership) return { error: "You are not a member of this pod" };
 
+  // Enforce consecutive message limit (max 2 in a row)
+  const { data: recentMsgs } = await supabase
+    .from("messages")
+    .select("user_id")
+    .eq("pod_id", podId)
+    .order("created_at", { ascending: false })
+    .limit(2);
+
+  if (
+    recentMsgs &&
+    recentMsgs.length >= 2 &&
+    recentMsgs.every((m) => m.user_id === user.id)
+  ) {
+    return { error: "Let someone else jump in first" };
+  }
+
   const { error } = await supabase
     .from("messages")
     .insert({ pod_id: podId, user_id: user.id, content: trimmed });
+
+  if (error) return { error: error.message };
+}
+
+export async function editMessage(
+  messageId: string,
+  content: string
+): Promise<{ error: string } | void> {
+  const trimmed = content.trim();
+  if (!trimmed) return { error: "Message cannot be empty" };
+  if (trimmed.length < 50) return { error: "Message too short" };
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: message } = await supabase
+    .from("messages")
+    .select("user_id, created_at")
+    .eq("id", messageId)
+    .single();
+
+  if (!message) return { error: "Message not found" };
+  if (message.user_id !== user.id) return { error: "Not your message" };
+
+  const messageAge = Date.now() - new Date(message.created_at).getTime();
+  if (messageAge > 5 * 60 * 1000) return { error: "Edit window has passed" };
+
+  const { error } = await supabase
+    .from("messages")
+    .update({
+      content: trimmed,
+      is_edited: true,
+      edited_at: new Date().toISOString(),
+    })
+    .eq("id", messageId);
 
   if (error) return { error: error.message };
 }
