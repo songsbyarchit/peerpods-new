@@ -5,9 +5,10 @@ import { sendMessage } from "@/app/actions";
 
 interface MessageInputProps {
   podId: string;
+  onSend?: (content: string) => void;
 }
 
-export default function MessageInput({ podId }: MessageInputProps) {
+export default function MessageInput({ podId, onSend }: MessageInputProps) {
   const [content, setContent] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -22,6 +23,8 @@ export default function MessageInput({ podId }: MessageInputProps) {
     setContent("");
     // Reset height
     if (textareaRef.current) textareaRef.current.style.height = "auto";
+
+    onSend?.(snapshot);
 
     startTransition(async () => {
       const result = await sendMessage(podId, snapshot);

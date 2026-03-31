@@ -35,6 +35,20 @@ export default function PodThread({
   const isInitialLoad = useRef(true);
   const supabase = createClient();
 
+  function handleOptimisticSend(content: string) {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `optimistic-${Date.now()}`,
+        pod_id: pod.id,
+        user_id: userId!,
+        content,
+        created_at: new Date().toISOString(),
+        profiles: null,
+      },
+    ]);
+  }
+
   function handleLeave() {
     setLeaveError(null);
     startLeaveTransition(async () => {
@@ -89,12 +103,21 @@ export default function PodThread({
             .eq("id", newMsg.user_id)
             .single();
 
+          const confirmed = { ...newMsg, profiles: profile ? { username: profile.username } : null };
           setMessages((prev) => {
             if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [
-              ...prev,
-              { ...newMsg, profiles: profile ? { username: profile.username } : null },
-            ];
+            // Replace the optimistic placeholder for the current user's message
+            if (newMsg.user_id === userId) {
+              const optimisticIdx = prev.findLastIndex(
+                (m) => m.id.startsWith("optimistic-") && m.content === newMsg.content
+              );
+              if (optimisticIdx !== -1) {
+                const updated = [...prev];
+                updated[optimisticIdx] = confirmed;
+                return updated;
+              }
+            }
+            return [...prev, confirmed];
           });
         }
       )
@@ -234,7 +257,7 @@ export default function PodThread({
       <div className="shrink-0 border-t border-border bg-background">
         <div className="mx-auto max-w-2xl">
           {!expired && isMember ? (
-            <MessageInput podId={pod.id} />
+            <MessageInput podId={pod.id} onSend={handleOptimisticSend} />
           ) : !expired && userId ? (
             <JoinPrompt podId={pod.id} isFull={currentMemberCount >= pod.max_members} />
           ) : !expired ? (
