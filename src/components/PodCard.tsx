@@ -41,6 +41,7 @@ export default function PodCard({ pod, isJoined, userId }: PodCardProps) {
   }
 
   return (
+    <>
     <Card
       className={cn(
         "transition-shadow hover:shadow-md",
@@ -142,5 +143,6 @@ export default function PodCard({ pod, isJoined, userId }: PodCardProps) {
         onClose={() => setPreviewOpen(false)}
       />
     )}
+    </>
   );
 }
