@@ -7,6 +7,7 @@ import { joinPod } from "@/app/actions";
 import type { PodWithCount } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
+import PodPreviewModal from "@/components/PodPreviewModal";
 
 interface PodCardProps {
   pod: PodWithCount;
@@ -19,6 +20,7 @@ export default function PodCard({ pod, isJoined, userId }: PodCardProps) {
   const [expired, setExpired] = useState(() => isPodExpired(pod.expires_at));
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const memberCount = pod.pod_members?.[0]?.count ?? 0;
 
@@ -98,12 +100,12 @@ export default function PodCard({ pod, isJoined, userId }: PodCardProps) {
             </Link>
           ) : (
             <div className="flex gap-2">
-              <Link
-                href={`/pods/${pod.id}`}
+              <button
+                onClick={() => setPreviewOpen(true)}
                 className="rounded-md px-3 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border transition-colors hover:bg-muted"
               >
                 Preview
-              </Link>
+              </button>
               {userId && memberCount < pod.max_members && (
                 <button
                   onClick={handleJoin}
@@ -131,5 +133,14 @@ export default function PodCard({ pod, isJoined, userId }: PodCardProps) {
         </div>
       </CardFooter>
     </Card>
+
+    {previewOpen && (
+      <PodPreviewModal
+        pod={pod}
+        isJoined={!!isJoined}
+        userId={userId ?? null}
+        onClose={() => setPreviewOpen(false)}
+      />
+    )}
   );
 }

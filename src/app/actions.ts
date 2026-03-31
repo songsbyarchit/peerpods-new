@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createServerSupabaseClient } from "@/lib/supabase";
+import type { PreviewMessage } from "@/lib/types";
 
 export type ActionState = { error?: string; sent?: boolean } | null;
 
@@ -299,6 +300,21 @@ export async function editMessage(
     .eq("id", messageId);
 
   if (error) return { error: error.message };
+}
+
+export async function getPreviewMessages(
+  podId: string
+): Promise<{ messages: PreviewMessage[]; error?: string }> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("messages")
+    .select("id, content, user_id, created_at, profiles(username)")
+    .eq("pod_id", podId)
+    .order("created_at", { ascending: true })
+    .limit(3);
+
+  if (error) return { messages: [], error: error.message };
+  return { messages: (data as unknown as PreviewMessage[]) ?? [] };
 }
 
 export async function signOut() {

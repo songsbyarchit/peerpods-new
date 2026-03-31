@@ -30,6 +30,14 @@ export type Message = {
   profiles: { username: string } | null
 }
 
+export type PreviewMessage = {
+  id: string
+  content: string
+  user_id: string
+  created_at: string
+  profiles: { username: string } | null
+}
+
 export const TOPIC_TAGS = [
   'Philosophy',
   'Relationships',
